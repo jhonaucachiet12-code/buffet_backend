@@ -10,18 +10,36 @@ Future<Response> onRequest(RequestContext context) async {
   final body = await context.request.json() as Map<String, dynamic>;
   final pool = await Database.pool;
 
-  // Usamos :nombre en lugar de ? y pasamos un Map
-  final result = await pool.execute(
-    'INSERT INTO orders (student_name, student_course, ticket_code, status, payment_method, total) VALUES (:studentName, :course, :ticketCode, :status, :paymentMethod, :total)',
+  // 1. Insertar la orden principal (Quitamos 'params:')
+  final orderResult = await pool.execute(
+    'INSERT INTO orders (student_name, student_course, ticket_code, status, payment_method, total) VALUES (:name, :course, :ticket, :status, :payment, :total)',
     {
-      'studentName': body['studentName'],
+      'name': body['studentName'],
       'course': body['course'],
-      'ticketCode': body['ticketCode'],
+      'ticket': body['ticketCode'],
       'status': body['status'],
-      'paymentMethod': body['paymentMethod'],
+      'payment': body['paymentMethod'],
       'total': body['total'],
     },
   );
 
-  return Response.json(body: {'orderId': result.lastInsertID});
+  final orderId = orderResult.lastInsertID;
+
+  // 2. Insertar los productos de ese pedido (Quitamos 'params:')
+  final items = body['items'] as List<dynamic>;
+  for (var item in items) {
+    await pool.execute(
+      'INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (:orderId, :productId, :quantity, :price)',
+      {
+        'orderId': orderId,
+        'productId': item['productId'],
+        'quantity': item['quantity'],
+        'price': item['price'],
+      },
+    );
+  }
+
+  return Response.json(
+    body: {'orderId': orderId, 'ticketCode': body['ticketCode']},
+  );
 }
