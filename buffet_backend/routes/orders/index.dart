@@ -23,7 +23,7 @@ Future<Response> onRequest(RequestContext context) async {
     },
   );
 
-  final orderId = orderResult.lastInsertID;
+  final orderId = orderResult.lastInsertID.toInt(); // <-- Agregamos .toInt()
 
   // 2. Insertar los productos de ese pedido (Quitamos 'params:')
   final items = body['items'] as List<dynamic>;
