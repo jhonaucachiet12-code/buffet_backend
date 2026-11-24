@@ -2,43 +2,81 @@ import 'dart:convert';
 import 'package:dart_frog/dart_frog.dart';
 import '../../lib/src/database.dart';
 
+// Estados válidos de un pedido (coinciden con el ENUM de la base de datos):
+//  - Pending_Payment: pedido nuevo, el vendedor todavía no respondió
+//  - Preparing:       el vendedor lo aceptó
+//  - Rejected:        el vendedor lo rechazó
+//  - Cancelled:       pedido cancelado
+const _validStatuses = [
+  'Pending_Payment',
+  'Preparing',
+  'Cancelled',
+  'Rejected',
+];
+
 Future<Response> onRequest(RequestContext context) async {
   final pool = await Database.pool;
 
-  // GET: Devuelve todos los pedidos con su cantidad de productos
+  // GET: Devuelve los pedidos (los últimos 200) con sus productos
   if (context.request.method == HttpMethod.get) {
     try {
       // Pedimos las columnas una por una (en vez de o.*) para que el orden
       // sea siempre el mismo, sin depender de cómo esté armada la tabla.
       // Índices: 0 id, 1 nombre, 2 curso, 3 ticket, 4 estado, 5 pago,
-      // 6 total, 7 itemCount.
+      // 6 total, 7 fecha (en segundos desde 1970, no depende de la zona horaria).
       final result = await pool.execute(
-        'SELECT o.id, o.student_name, o.student_course, o.ticket_code, '
-        'o.status, o.payment_method, o.total, '
-        'COALESCE(SUM(oi.quantity), 0) AS itemCount '
-        'FROM orders o LEFT JOIN order_items oi ON o.id = oi.order_id '
-        'GROUP BY o.id, o.student_name, o.student_course, o.ticket_code, '
-        'o.status, o.payment_method, o.total, o.created_at '
-        'ORDER BY o.created_at DESC',
+        'SELECT id, student_name, student_course, ticket_code, status, '
+        'payment_method, total, UNIX_TIMESTAMP(created_at) '
+        'FROM orders ORDER BY created_at DESC, id DESC LIMIT 200',
       );
-      final orders = result.rows
-          .map(
-            (row) => {
-              // Usamos colAt y toString() para evitar el error del tipo DECIMAL
-              'id': int.parse(row.colAt(0).toString()),
-              'studentName': row.colAt(1)?.toString() ?? 'Alumno',
-              'course': row.colAt(2)?.toString() ?? 'Curso',
-              'ticketCode': row.colAt(3)?.toString() ?? 'Ticket',
-              'status': row.colAt(4)?.toString() ?? 'Pending_Payment',
-              'paymentMethod': row.colAt(5)?.toString() ?? 'Cash',
-              'total': double.parse(row.colAt(6).toString()),
-              // Si no hay productos mandamos 0
-              'itemCount': row.colAt(7) != null
-                  ? double.parse(row.colAt(7).toString()).toInt()
-                  : 0,
-            },
-          )
-          .toList();
+
+      final orders = <Map<String, dynamic>>[];
+      for (final row in result.rows) {
+        // Usamos colAt y toString() para evitar el error del tipo DECIMAL
+        orders.add({
+          'id': int.parse(row.colAt(0).toString()),
+          'studentName': row.colAt(1)?.toString() ?? 'Alumno',
+          'course': row.colAt(2)?.toString() ?? 'Curso',
+          'ticketCode': row.colAt(3)?.toString() ?? 'Ticket',
+          'status': row.colAt(4)?.toString() ?? 'Pending_Payment',
+          'paymentMethod': row.colAt(5)?.toString() ?? 'Cash',
+          'total': double.parse(row.colAt(6).toString()),
+          'createdAt': row.colAt(7) != null
+              ? double.tryParse(row.colAt(7).toString())?.toInt()
+              : null,
+          'items': <Map<String, dynamic>>[],
+          'itemCount': 0,
+        });
+      }
+
+      // Traemos los productos de esos pedidos en una sola consulta.
+      // Los ids son números que salieron de la base, por eso se pueden
+      // unir de forma segura en el IN (...).
+      if (orders.isNotEmpty) {
+        final ids = orders.map((o) => o['id'].toString()).join(',');
+        final itemsResult = await pool.execute(
+          'SELECT oi.order_id, p.name, oi.quantity, oi.price '
+          'FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id '
+          'WHERE oi.order_id IN ($ids) ORDER BY oi.id',
+        );
+
+        final byOrder = <int, Map<String, dynamic>>{};
+        for (final o in orders) {
+          byOrder[o['id'] as int] = o;
+        }
+        for (final row in itemsResult.rows) {
+          final order = byOrder[int.parse(row.colAt(0).toString())];
+          if (order == null) continue;
+          final quantity = int.parse(row.colAt(2).toString());
+          (order['items'] as List<Map<String, dynamic>>).add({
+            'name': row.colAt(1)?.toString() ?? 'Producto eliminado',
+            'quantity': quantity,
+            'price': double.parse(row.colAt(3).toString()),
+          });
+          order['itemCount'] = (order['itemCount'] as int) + quantity;
+        }
+      }
+
       return Response.json(body: orders);
     } catch (e) {
       // Queda registrado en los logs de Railway
@@ -64,13 +102,14 @@ Future<Response> onRequest(RequestContext context) async {
         );
       }
 
+      // Todo pedido nuevo entra como 'Pending_Payment' (pendiente de que el
+      // vendedor lo acepte o lo rechace), sin importar lo que mande la app.
       final orderResult = await pool.execute(
-        'INSERT INTO orders (student_name, student_course, ticket_code, status, payment_method, total) VALUES (:name, :course, :ticket, :status, :payment, :total)',
+        "INSERT INTO orders (student_name, student_course, ticket_code, status, payment_method, total) VALUES (:name, :course, :ticket, 'Pending_Payment', :payment, :total)",
         {
           'name': body['studentName'],
           'course': body['course'],
           'ticket': body['ticketCode'],
-          'status': body['status'],
           'payment': body['paymentMethod'],
           'total': body['total'],
         },
@@ -115,9 +154,19 @@ Future<Response> onRequest(RequestContext context) async {
   if (context.request.method == HttpMethod.patch) {
     try {
       final body = await context.request.json() as Map<String, dynamic>;
+
+      final id = int.tryParse(body['id'].toString());
+      final status = body['status']?.toString();
+      if (id == null || status == null || !_validStatuses.contains(status)) {
+        return Response.json(
+          statusCode: 400,
+          body: {'error': 'Pedido o estado inválido'},
+        );
+      }
+
       await pool.execute(
         'UPDATE orders SET status = :status WHERE id = :id',
-        {'status': body['status'], 'id': body['id']},
+        {'status': status, 'id': id},
       );
       return Response.json(body: {'success': true});
     } catch (e) {
