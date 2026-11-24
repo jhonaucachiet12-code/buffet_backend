@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:mysql_dart/mysql_dart.dart';
+import 'package:mysql_dart/mysql_dart.dart'; // <-- Import correcto
 import 'package:dotenv/dotenv.dart';
 
 class Database {
@@ -12,12 +12,11 @@ class Database {
     final caFromEnv = _env['DB_CA_CERT'];
 
     if (caFromEnv != null && caFromEnv.isNotEmpty) {
-      // Railway: el certificado viene en una variable de entorno.
-      // Algunas plataformas guardan los saltos de línea como "\n" literal.
+      // Railway: el certificado viene en la variable de entorno
       final pem = caFromEnv.replaceAll(r'\n', '\n');
       context.setTrustedCertificatesBytes(utf8.encode(pem));
     } else {
-      // Local: el certificado está en un archivo en la raíz del backend.
+      // Local: archivo ca.pem en la raíz del backend
       context.setTrustedCertificates('ca.pem');
     }
     return context;
@@ -33,8 +32,8 @@ class Database {
       password: _env['DB_PASS'] ?? '',
       databaseName: _env['DB_NAME'] ?? 'defaultdb',
       maxConnections: 10,
-      secure: true,
-      securityContext: _buildSecurityContext(),
+      secure: true, // Activa TLS
+      securityContext: _buildSecurityContext(), // <-- Correcto para mysql_dart
     );
     return _pool!;
   }
