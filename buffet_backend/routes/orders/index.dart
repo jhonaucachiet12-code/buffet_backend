@@ -13,14 +13,18 @@ Future<Response> onRequest(RequestContext context) async {
     final orders = result.rows
         .map(
           (row) => {
-            'id': int.parse(row.typedColAt<int>(0).toString()),
-            'studentName': row.typedColAt<String>(2) ?? 'Alumno',
-            'course': row.typedColAt<String>(3) ?? 'Curso',
-            'ticketCode': row.typedColAt<String>(4) ?? 'Ticket',
-            'status': row.typedColAt<String>(5) ?? 'Pendiente',
-            'paymentMethod': row.typedColAt<String>(6) ?? 'Efectivo',
-            'total': double.parse(row.typedColAt<double>(7).toString()),
-            'itemCount': int.parse(row.typedColAt<int>(8).toString() ?? '0'),
+            // Usamos colAt y toString() para evitar el error del tipo DECIMAL
+            'id': int.parse(row.colAt(0).toString()),
+            'studentName': row.colAt(2)?.toString() ?? 'Alumno',
+            'course': row.colAt(3)?.toString() ?? 'Curso',
+            'ticketCode': row.colAt(4)?.toString() ?? 'Ticket',
+            'status': row.colAt(5)?.toString() ?? 'Pendiente',
+            'paymentMethod': row.colAt(6)?.toString() ?? 'Efectivo',
+            'total': double.parse(row.colAt(7).toString()),
+            // Si no hay productos (itemCount es null), mandamos 0
+            'itemCount': row.colAt(8) != null
+                ? int.parse(row.colAt(8).toString())
+                : 0,
           },
         )
         .toList();
@@ -43,7 +47,7 @@ Future<Response> onRequest(RequestContext context) async {
       },
     );
 
-    final orderId = orderResult.lastInsertID.toInt(); // <-- Agregamos .toInt()
+    final orderId = orderResult.lastInsertID.toInt();
 
     final items = body['items'] as List<dynamic>;
     for (var item in items) {
@@ -62,7 +66,7 @@ Future<Response> onRequest(RequestContext context) async {
     );
   }
 
-  // PATCH: Actualizar estado (Aceptar/Rechazar) <-- NUEVO
+  // PATCH: Actualizar estado (Aceptar/Rechazar)
   if (context.request.method == HttpMethod.patch) {
     final body = await context.request.json() as Map<String, dynamic>;
     await pool.execute(
