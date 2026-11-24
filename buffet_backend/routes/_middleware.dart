@@ -15,9 +15,9 @@ Handler middleware(Handler handler) {
   });
 }
 
+// En tu backend, routes/_middleware.dart
 const _corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  // IMPORTANTE: Agregamos PATCH aquí
+  'Access-Control-Allow-Origin': '*', // Permite que Firebase se conecte
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Origin, Content-Type, Accept, Authorization',
 };

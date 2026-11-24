@@ -10,13 +10,13 @@ Future<Response> onRequest(RequestContext context) async {
     final products = result.rows
         .map(
           (row) => {
-            'id': int.parse(row.colAt(0)!),
-            'categoryId': int.parse(row.colAt(1)!),
-            'name': row.colAt(2),
-            'description': row.colAt(3),
-            'price': double.parse(row.colAt(4)!),
-            'status': row.colAt(5),
-            'unavailableReason': row.colAt(6),
+            'id': int.parse(row.colAt(0).toString()),
+            'categoryId': int.parse(row.colAt(1).toString()),
+            'name': row.colAt(2).toString(),
+            'description': row.colAt(3).toString(),
+            'price': double.parse(row.colAt(4).toString()),
+            'status': row.colAt(5).toString(),
+            'unavailableReason': row.colAt(6)?.toString(),
           },
         )
         .toList();
@@ -28,11 +28,11 @@ Future<Response> onRequest(RequestContext context) async {
     final id = body['id'];
     final price = body['price'];
     final status = body['status'];
+    final reason = body['unavailableReason'] ?? 'Sin stock';
 
-    // CORRECCIÓN: Quitamos 'params:' y pasamos el Map directamente
     await pool.execute(
-      'UPDATE products SET price = :price, status = :status WHERE id = :id',
-      {'price': price, 'status': status, 'id': id},
+      'UPDATE products SET price = :price, status = :status, unavailable_reason = :reason WHERE id = :id',
+      {'price': price, 'status': status, 'reason': reason, 'id': id},
     );
     return Response.json(body: {'success': true});
   }

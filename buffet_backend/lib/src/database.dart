@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:mysql_client/mysql_client.dart';
+import 'package:mysql_dart/mysql_dart.dart';
 import 'package:dotenv/dotenv.dart';
 
 class Database {
@@ -9,8 +9,9 @@ class Database {
   static Future<MySQLConnectionPool> get pool async {
     if (_pool != null) return _pool!;
 
-    // Leemos el certificado SSL de Aiven
-    final sslContext = SecurityContext()..setTrustedCertificates('ca.pem');
+    // 1. Creamos el contexto de seguridad y cargamos el certificado de Aiven
+    final sslContext = SecurityContext(withTrustedRoots: true)
+      ..setTrustedCertificates('ca.pem');
 
     _pool = MySQLConnectionPool(
       host: _env['DB_HOST'] ?? '',
@@ -19,9 +20,8 @@ class Database {
       password: _env['DB_PASS'] ?? '',
       databaseName: _env['DB_NAME'] ?? 'defaultdb',
       maxConnections: 10,
-      secure: true, // Obligatorio para Aiven
-      // Algunas versiones de mysql_client piden el contexto SSL así:
-      // sslContext: sslContext,
+      secure: true,
+      securityContext: sslContext,
     );
     return _pool!;
   }
